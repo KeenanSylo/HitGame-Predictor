@@ -1,76 +1,39 @@
 # HitGame Predictor – Model Progress Log
 
 ## Overview
-The goal of this project is to predict whether a Steam game will become a "hit" based on metadata from SteamSpy and the Steam Storefront.  
+This project predicts whether a Steam game becomes a “hit” using metadata from SteamSpy and the Steam Storefront.  
 Model: **XGBoost Classifier**  
-Dataset size (after merge): **478 games**
+Dataset size: **478 games**
 
 ---
 
-## 2025-10-30 — Initial Baseline Model
+## Model Performance Summary
 
-### Dataset
-- Total samples: **478**
-- Positive (hit): **67**
-- Negative (non-hit): **411**
-- Labeling rule: owners_est ≥ 10^6 (1 million)
-- Free-to-play titles: removed
-- Train/validation split: 80/20 stratified
+| Version | Description | ROC-AUC | PR-AUC | Precision | Recall | F1 | Accuracy |
+|----------|--------------|----------|--------|------------|---------|----|-----------|
+| **v0.1 (2025-10-30)** | Baseline model | 0.796 | — | 0.50 | 0.08 | 0.13 | 0.86 |
+| **v0.2 (2025-10-31)** | Weighted + PR-tuned model | **0.855** | **0.469** | 0.43 | **0.69** | **0.53** | 0.83 |
 
-### Model Setup
-| Parameter | Value |
-|------------|--------|
-| Algorithm | XGBoost (binary:logistic) |
-| Version | 3.1.1 |
-| n_estimators | 300 |
-| learning_rate | 0.1 |
-| max_depth | 5 |
-| subsample | 0.8 |
-| colsample_bytree | 0.8 |
-| random_state | 42 |
-
-### Evaluation (baseline threshold = 0.5)
-
-| Metric | Value |
-|---------|--------|
-| ROC-AUC | **0.796** |
-| Accuracy | **0.86** |
-| Precision (class 1) | **0.50** |
-| Recall (class 1) | **0.08** |
-| F1-score (class 1) | **0.13** |
-| Samples tested | 96 |
-
-### Confusion Matrix (approx.)
-|          | Pred 0 | Pred 1 |
-|-----------|---------|--------|
-| **True 0** | 82 | 1 |
-| **True 1** | 12 | 1 |
-
-### Interpretation
-- The model easily identifies non-hits (class 0) but rarely predicts hits (class 1).
-- High accuracy is misleading due to class imbalance.
-- ROC-AUC is promising, suggesting there is signal in the data.
-- Next step: improve **recall** for class 1 (hits) by:
-  1. Adding `scale_pos_weight` to handle imbalance.
-  2. Using `aucpr` (PR-AUC) as eval metric.
-  3. Applying early stopping and dynamic probability threshold.
-  4. Exploring percentile-based labeling and release-year filtering.
+**Improvement:** Recall ↑ from 0.08 → 0.69, F1 ↑ from 0.13 → 0.53, ROC-AUC ↑ from 0.796 → 0.855.
 
 ---
 
-## Planned Next Experiments
-
-| Date | Experiment | Goal |
-|------|-------------|------|
-| TBD | Add `scale_pos_weight` (neg/pos) | Improve hit recall |
-| TBD | Tune threshold by PR curve | Better F1 balance |
-| TBD | Add early stopping & validation split | Prevent overfit |
-| TBD | Try percentile-based label | Robust label balance |
-| TBD | Feature importance review | Understand drivers of “hit” |
+## v0.1 – Baseline
+- Label: hit if owners_est ≥ 1M  
+- Model: XGBoost (300 trees, learning_rate=0.1, max_depth=5)  
+- Result: high accuracy but poor recall for hits.
 
 ---
 
-## Notes
-- Model file saved to: `data/models/xgb_hit_predictor.pkl`
-- Dataset file: `data/features/base_dataset.csv`
-- Next improvement commit: **v0.2 — Weighted & PR-tuned model**
+## v0.2 – Weighted & PR-Tuned
+- Added `scale_pos_weight` to balance classes.  
+- Used PR-AUC as eval metric with early stopping.  
+- Tuned decision threshold for better F1.  
+- Result: much better recall and overall balance.
+
+---
+
+## Next Steps
+- Add new features (tags, price ratio, description length).  
+- Try cross-validation for more stable metrics.  
+- Possibly refine hit-label definition by percentiles.
