@@ -24,9 +24,9 @@ def build_dataset(storefront_csv, steamspy_csv):
     # remove free-to-play games (massive owner counts)
     df = df[df["is_free"] != True]
 
-    # label: hit if owners >= 1,000,000
-    hit_threshold = 1_000_000
+    hit_threshold = 10_000_000  # 10 million
     df["hit_label"] = (df["owners_est"].fillna(0) >= hit_threshold).astype(int)
+
 
     # optional sanity check
     print("Hit label distribution:")

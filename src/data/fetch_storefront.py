@@ -42,5 +42,13 @@ def fetch_many(appids, out_csv="data/raw/storefront_games.csv"):
     return out_csv
 
 if __name__ == "__main__":
-    demo_appids = [1091500, 381210, 1145360, 582010]  # example
-    fetch_many(demo_appids)
+    appids_df = pd.read_csv("data/raw/appids.csv")
+    appids = appids_df["appid"].astype(int).tolist()
+
+    out_path = "data/raw/storefront_games.csv"
+    if Path(out_path).exists():
+        existing = set(pd.read_csv(out_path)["appid"])
+        appids = [a for a in appids if a not in existing]
+        print(f"Resuming: {len(appids)} remaining...")
+
+    fetch_many(appids, out_csv=out_path)

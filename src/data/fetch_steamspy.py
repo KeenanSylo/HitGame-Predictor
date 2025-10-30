@@ -35,5 +35,6 @@ def fetch_many(appids, out_csv="data/raw/steamspy_games.csv"):
     return out_csv
 
 if __name__ == "__main__":
-    demo_appids = [1091500, 381210, 1145360, 582010]
-    fetch_many(demo_appids)
+    appids_df = pd.read_csv("data/raw/appids.csv")
+    appids = appids_df["appid"].astype(int).tolist()
+    fetch_many(appids)
