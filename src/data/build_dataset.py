@@ -21,8 +21,16 @@ def build_dataset(storefront_csv, steamspy_csv):
             return None
     df["owners_est"] = df["owners"].apply(parse_midpoint)
 
-    # label: hit if owners >= 200k
-    df["hit_label"] = (df["owners_est"] >= 200_000).astype(int)
+    # remove free-to-play games (massive owner counts)
+    df = df[df["is_free"] != True]
+
+    # label: hit if owners >= 1,000,000
+    hit_threshold = 1_000_000
+    df["hit_label"] = (df["owners_est"].fillna(0) >= hit_threshold).astype(int)
+
+    # optional sanity check
+    print("Hit label distribution:")
+    print(df["hit_label"].value_counts(dropna=False))
 
     df.to_csv(FEATURE_DIR / "base_dataset.csv", index=False)
     return df
