@@ -1,0 +1,71 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.egg
+*.log
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# Jupyter notebooks and temporary files
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+*.ipynb_backup
+*.bak
+
+# Data folders
+data/raw/*
+data/features/*
+data/models/*
+data/interim/*
+
+# Keep small essential files
+!data/raw/appids.csv
+!data/README.md
+
+# Model artifacts
+*.pkl
+*.joblib
+*.model
+*.h5
+*.pt
+*.onnx
+
+# Reports, plots, and temporary output
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.gif
+*.pdf
+*.html
+outputs/
+reports/
+
+# IDE and system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Streamlit cache
+.streamlit/
+.streamlit_cache/
+.streamlit/secrets.toml
+
+# Environment and configuration files
+.env
+.env.*
+config.yaml
+
+# Build and distribution folders
+build/
+dist/
+*.egg-info/
