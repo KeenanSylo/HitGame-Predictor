@@ -1,4 +1,5 @@
 pandas
+gradio
 numpy
 requests
 scikit-learn
