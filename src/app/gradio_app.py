@@ -1,5 +1,3 @@
-# src/app/gradio_app.py
-
 import json
 from pathlib import Path
 import re
@@ -20,7 +18,6 @@ AAA_META_PATH  = Path("data/models/meta_aaa.json")
 NICHE_MODEL_PATH = Path("data/models/ensemble_niche.pkl")
 NICHE_META_PATH  = Path("data/models/meta_niche.json")
 
-# Backward-compatible fallbacks (earlier versions)
 ENSEMBLE_FALLBACKS = [Path("data/models/ensemble_v050.pkl"),
                       Path("data/models/ensemble_v041.pkl")]
 META_FALLBACKS     = [Path("data/models/meta_v050.json"),
@@ -297,47 +294,95 @@ def get_leaderboard(top_n=10):
     return df[keep].head(top_n)
 
 
-def get_niche_leaderboard(top_n=10, years_back=5, max_owners=200_000, allow_free=True):
+def _niche_subset_strict(df, years_back, max_owners, allow_free):
+    """Strict filters: if they exclude everything, return empty (no relaxation)."""
+    out = df.copy()
+
+    # release year
+    out["release_year"] = out.get("release_date", "").apply(_parse_year)
+    current_year = pd.Timestamp.now().year
+    out = out[out["release_year"].fillna(0) >= (current_year - years_back)]
+
+    # owners cap: keep rows with NaN (unknown) OR owners_est <= max_owners
+    if "owners_est" in out.columns and max_owners is not None:
+        out["owners_est"] = pd.to_numeric(out["owners_est"], errors="coerce")
+        known = out["owners_est"].notna()
+        out = out[~known | (out["owners_est"] <= max_owners)]
+
+    if not allow_free and "is_free" in out.columns:
+        out = out[out["is_free"] == False]
+
+    return out
+
+
+def _niche_subset_relaxed(df, years_back, max_owners, allow_free):
+    """Relaxed fallback (previous behavior): try filters, but don’t enforce if empty."""
+    base = df.copy()
+    base["release_year"] = base.get("release_date", "").apply(_parse_year)
+    current_year = pd.Timestamp.now().year
+    year_mask = base["release_year"].fillna(0) >= (current_year - years_back)
+    df1 = base[year_mask] if year_mask.any() else base
+
+    if "owners_est" in df1.columns and max_owners is not None:
+        df1["owners_est"] = pd.to_numeric(df1["owners_est"], errors="coerce")
+        known = df1["owners_est"].notna()
+        cap_mask = ~known | (df1["owners_est"] <= max_owners)
+        df2 = df1[cap_mask] if cap_mask.any() else df1
+    else:
+        df2 = df1
+
+    if not allow_free and "is_free" in df2.columns:
+        df3 = df2[df2["is_free"] == False]
+        if df3.empty:
+            df3 = df2
+    else:
+        df3 = df2
+
+    if df3.empty:
+        tmp = base.copy()
+        tmp = tmp.sort_values("release_year", ascending=False, na_position="last").head(200)
+        return tmp
+    return df3
+
+
+def get_niche_leaderboard(top_n=10, years_back=5, max_owners=200_000, allow_free=True, relax_if_empty=False):
     """
-    Rank niche games by predicted popularity (using the niche model if available).
+    Rank niche games by predicted popularity.
 
     Filters:
       - released within last `years_back` years
-      - owners_est <= max_owners (if owners_est exists). IMPORTANT: rows with NaN owners_est are KEPT.
+      - owners_est <= max_owners for known owners (NaN owners are KEPT)
       - include F2P if allow_free=True
+      - if relax_if_empty=True, we gracefully widen filters to show something
     """
     if not DATA_PATH.exists():
         return pd.DataFrame(columns=["name", "predicted_popularity", "owners_est", "release_year", "price_final"])
 
-    df = pd.read_csv(DATA_PATH).copy()
-    if df.empty:
+    raw = pd.read_csv(DATA_PATH)
+    if raw.empty:
         return pd.DataFrame(columns=["name", "predicted_popularity", "owners_est", "release_year", "price_final"])
 
-    # derive release_year and filter by years_back
-    df["release_year"] = df.get("release_date", "").apply(_parse_year)
-    current_year = pd.Timestamp.now().year
-    df = df[df["release_year"].fillna(0) >= (current_year - years_back)]
-
-    # owners cap: KEEP NaNs (unknown owners) and only cap known owners
-    if "owners_est" in df.columns and max_owners is not None:
-        df["owners_est"] = pd.to_numeric(df["owners_est"], errors="coerce")
-        known_mask = df["owners_est"].notna()
-        cap_mask = ~known_mask | (df["owners_est"] <= max_owners)
-        df = df[cap_mask]
-
-    if not allow_free and "is_free" in df.columns:
-        df = df[df["is_free"] == False]
+    if relax_if_empty:
+        df = _niche_subset_relaxed(raw, years_back, max_owners, allow_free)
+    else:
+        df = _niche_subset_strict(raw, years_back, max_owners, allow_free)
 
     if df.empty:
         return pd.DataFrame(columns=["name", "predicted_popularity", "owners_est", "release_year", "price_final"])
 
     # Build features and predict in batch
     X, _ = engineer_features(df, return_target=False)
-    feature_cols = NICHE_FEATURES if NICHE_MODEL is not None else (AAA_FEATURES if AAA_MODEL is not None else None)
-    if feature_cols is None:
-        return pd.DataFrame(columns=["name", "predicted_popularity", "owners_est", "release_year", "price_final"])
 
-    X = _align_features(X, feature_cols)
+    feat_cols = None
+    if NICHE_MODEL is not None and NICHE_FEATURES:
+        feat_cols = NICHE_FEATURES
+    elif AAA_MODEL is not None and AAA_FEATURES:
+        feat_cols = AAA_FEATURES
+
+    X = _align_features(X, feat_cols)
+    if feat_cols is None:
+        X = X.reindex(sorted(X.columns.astype(str)), axis=1)
+
     model = NICHE_MODEL if NICHE_MODEL is not None else AAA_MODEL
     if model is None:
         return pd.DataFrame(columns=["name", "predicted_popularity", "owners_est", "release_year", "price_final"])
@@ -347,12 +392,11 @@ def get_niche_leaderboard(top_n=10, years_back=5, max_owners=200_000, allow_free
     out = pd.DataFrame({
         "name": df.get("name", pd.Series(["Unknown"] * len(df))),
         "predicted_popularity": probs,
-        "owners_est": df.get("owners_est", pd.Series([np.nan] * len(df))),
-        "release_year": df["release_year"],
+        "owners_est": pd.to_numeric(df.get("owners_est", pd.Series([np.nan] * len(df))), errors="coerce"),
+        "release_year": df.get("release_year", df.get("release_date", "")),
         "price_final": df.get("price_final", pd.Series([np.nan] * len(df))),
     }).sort_values("predicted_popularity", ascending=False).head(top_n).reset_index(drop=True)
 
-    # show probability as percent
     out["predicted_popularity"] = (out["predicted_popularity"] * 100).round(2)
     return out
 
@@ -376,15 +420,6 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             out = gr.Markdown()
             btn.click(predict_hit, inputs=[query, mode], outputs=out)
 
-            # Model availability hint
-            hint = []
-            if not AAA_MODE_READY:
-                hint.append("- AAA model not found; using fallback if available.")
-            if not NICHE_MODE_READY:
-                hint.append("- Niche model not found; using AAA model as fallback.")
-            if hint:
-                gr.Markdown("\n".join(hint))
-
         with gr.Tab("Top Games"):
             gr.Markdown("Top games by owners (AAA) and by predicted popularity (Niche):")
             with gr.Row():
@@ -394,32 +429,37 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 years_in = gr.Slider(1, 10, value=5, step=1, label="Years back")
                 owners_in = gr.Number(value=200_000, label="Max owners (set -1 for no cap)")
                 free_in = gr.Checkbox(value=True, label="Include Free-to-Play")
+                relax_in = gr.Checkbox(value=False, label="Relax filters if empty (fallback)")
                 topn_in = gr.Slider(5, 50, value=10, step=1, label="Top N")
 
             table_niche = gr.Dataframe(interactive=False, wrap=True, label="Niche Leaderboard (by predicted popularity %)")
 
-            def _niche_lb_cb(y, o, f, n):
+            def _niche_lb_cb(y, o, f, r, n):
                 cap = None if (o is None or (isinstance(o, (int, float)) and o < 0)) else int(o)
-                return get_niche_leaderboard(top_n=int(n), years_back=int(y), max_owners=cap, allow_free=bool(f))
+                return get_niche_leaderboard(top_n=int(n), years_back=int(y), max_owners=cap, allow_free=bool(f), relax_if_empty=bool(r))
 
-            for ctl in (years_in, owners_in, free_in, topn_in):
-                ctl.change(_niche_lb_cb, inputs=[years_in, owners_in, free_in, topn_in], outputs=table_niche)
+            for ctl in (years_in, owners_in, free_in, relax_in, topn_in):
+                ctl.change(_niche_lb_cb, inputs=[years_in, owners_in, free_in, relax_in, topn_in], outputs=table_niche)
 
-            # initialize once
+            # initialize once (strict by default)
             table_niche.value = get_niche_leaderboard()
 
         with gr.Tab("About"):
             gr.Markdown(
                 f"""
 **Models available:**  
-- AAA: {"yes" if AAA_MODE_READY else "no"}  
-- Niche: {"yes" if NICHE_MODE_READY else "no"}  
+- AAA: {"yes" if AAA_MODEL is not None else "no"}  
+- Niche: {"yes" if NICHE_MODEL is not None else "no"}  
 
-This app supports two modes:
-- **AAA / Established:** uses engagement + metadata (SteamSpy + Storefront).
-- **New / Niche:** ignores SteamSpy and predicts from metadata only.
+**Where does `owners_est` come from?**  
+From SteamSpy’s `owners` range (e.g. `"200,000 .. 500,000"`).  
+During dataset build (`src/data/build_dataset.py`), we parse that string and store the **midpoint**  
+as `owners_est` (e.g. midpoint of 200k–500k is 350k). If SteamSpy doesn’t report owners for a title, `owners_est` is NaN.
 
-To get the best results, train and save two models:
+- **AAA / Established:** uses SteamSpy + Storefront features.  
+- **New / Niche:** ignores SteamSpy and predicts from Storefront-style metadata only.
+
+Train and save models to:
 - `data/models/ensemble_aaa.pkl`, `data/models/meta_aaa.json`
 - `data/models/ensemble_niche.pkl`, `data/models/meta_niche.json`
                 """
